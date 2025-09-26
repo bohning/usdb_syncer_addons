@@ -1,0 +1,22 @@
+# virtual environment
+venv
+.venv
+
+# IDEs
+.qt_for_python
+.vscode
+.vs
+
+# tooling
+.tox
+.mypy_cache
+.pytest_cache
+reports
+
+# Python
+**__pycache__
+**.egg-info
+
+# macOS Desktop Services Store files
+**/.DS_Store
+
