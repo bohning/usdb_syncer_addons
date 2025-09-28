@@ -12,7 +12,6 @@ from usdb_syncer.settings import Newline
 from usdb_syncer.song_txt import Headers, SongTxt, Tracks
 from usdb_syncer.song_txt.auxiliaries import replace_false_apostrophes
 from usdb_syncer.song_txt.tracks import BeatsPerMinute, Line, LineBreak, Note, NoteKind
-from usdb_syncer.usdb_scraper import SessionManager, get_logged_in_usdb_user
 
 SINGSTAR_XML_NAMESPACE_URI = "http://www.singstargame.com"
 NS_MAP_DEFAULT = {"ss": SINGSTAR_XML_NAMESPACE_URI}
@@ -48,6 +47,7 @@ SINGER_SOLO_2 = "Solo 2"
 SINGER_GROUP = "Group"
 
 # Default values
+DEFAULT_CREATOR = "SCEE London Studio"
 DEFAULT_EDITION = "SingStar PS3 DLC"
 DEFAULT_ARTIST = "Artist"
 DEFAULT_TITLE = "Title"
@@ -310,6 +310,7 @@ class XmlConverter:
         self.gap: int = 0
         self.language: str | None = None
         self.edition: str = DEFAULT_EDITION
+        self.creator: str = DEFAULT_CREATOR
         self.genre: str | None = None
         self.year: str | None = None
         self.is_duet: bool = False
@@ -756,7 +757,7 @@ class XmlConverter:
             edition=self.edition,
             genre=self.genre,
             year=self.year,
-            creator=get_logged_in_usdb_user(SessionManager.session()),
+            creator=self.creator,
             mp3=mp3_filename,
             cover=cover_filename,
             background=background_filename,
