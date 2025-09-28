@@ -443,7 +443,7 @@ class XmlConverter:
 
     def parse_bpm(self) -> None:
         """Calculates BPM from Tempo and Resolution"""
-        if not self.root:
+        if self.root is None:
             return
         if resolution := self.root.get(XML_ATTR_MELODY_RESOLUTION, None):
             self.resolution = Resolution.from_string(resolution)
@@ -457,7 +457,7 @@ class XmlConverter:
 
     def parse_duet_singer_names(self) -> None:
         """Parses duet singer names (from TRACK elements)"""
-        if not self.is_duet or not self.root:
+        if not self.is_duet or self.root is None:
             return
 
         singers: list[str] = []
