@@ -1,4 +1,5 @@
 import re
+import sys
 from enum import Enum, StrEnum
 from pathlib import Path
 
@@ -812,3 +813,8 @@ class XmlConverter:
             return details[0][0].capitalize()
         else:
             return None
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 2:
+        convert_singstar_xml_to_ultrastar_txt(Path(sys.argv[1]), True)
