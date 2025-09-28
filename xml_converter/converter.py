@@ -196,25 +196,6 @@ def _fix_lyric_string(lyric: str | None) -> str:
     return lyric + " "
 
 
-def fix_tilde_spacing(notes: list) -> None:
-    tilde_indices = []
-
-    for i, note in enumerate(notes):
-        if note.text.strip() == "~":
-            tilde_indices.append(i)
-        else:
-            if tilde_indices:
-                for j in tilde_indices[:-1]:
-                    notes[j].text = "~"
-                notes[tilde_indices[-1]].text = "~ "
-                tilde_indices.clear()
-
-    if tilde_indices:
-        for j in tilde_indices[:-1]:
-            notes[j].text = "~"
-        notes[tilde_indices[-1]].text = "~ "
-
-
 def _add_space_to_last_tilde(notes: list[Note]) -> None:
     """Adds a space to the last tilde in a sequence of repeated syllables."""
     i = 0
@@ -224,7 +205,10 @@ def _add_space_to_last_tilde(notes: list[Note]) -> None:
             while i + 1 < len(notes) and notes[i + 1].text == "~":
                 i += 1
             # We are now at the last ~ in the sequence
-            notes[i].text = "~ "
+            # Add space after it, unless the next syllable starts with ~ which means the ~ sequence
+            # already has an ending
+            if i + 1 >= len(notes) or not notes[i + 1].text.startswith("~"):
+                notes[i].text = "~ "
         i += 1
 
 
@@ -547,9 +531,6 @@ class XmlConverter:
 
         tracks.track_1 = p1_lines
         tracks.track_2 = p2_lines
-
-        for line in tracks.track_1 + tracks.track_2:
-            fix_tilde_spacing(line.notes)
 
         return tracks
 
