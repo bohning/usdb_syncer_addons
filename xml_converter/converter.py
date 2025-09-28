@@ -480,9 +480,11 @@ class XmlConverter:
                 replace_false_apostrophes(
                     artist_match.group(1)
                     .strip()
-                    .replace("&amp", "&")
+                    .replace("&amp;", "&")
                     .replace(" Ft ", " feat. ")
                     .replace(" Feat ", " feat. ")
+                    .replace(" Ft. ", " feat. ")
+                    .replace(" Feat. ", " feat. ")
                 )
             )
             if artist_match
@@ -491,7 +493,7 @@ class XmlConverter:
         self.title = (
             _insert_missing_spaces(
                 replace_false_apostrophes(
-                    title_match.group(1).strip().replace("&amp", "&")
+                    title_match.group(1).strip().replace("&amp;", "&")
                 )
             )
             if title_match
