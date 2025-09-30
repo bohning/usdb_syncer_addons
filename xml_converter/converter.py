@@ -14,7 +14,7 @@ from usdb_syncer.song_txt.auxiliaries import replace_false_apostrophes
 from usdb_syncer.song_txt.tracks import BeatsPerMinute, Line, LineBreak, Note, NoteKind
 
 SINGSTAR_XML_NAMESPACE_URI = "http://www.singstargame.com"
-NS_MAP_DEFAULT = {"ss": SINGSTAR_XML_NAMESPACE_URI}
+NS_MAP_DEFAULT = {None: SINGSTAR_XML_NAMESPACE_URI}
 
 # XML Element Names
 XML_ELEM_MELODY = "MELODY"
@@ -284,7 +284,6 @@ class XmlConverter:
         self.text: str = ""
         self.root: etree._Element | None = None
         self.ns_map: dict[str, str] | None = None
-        self.ns_prefix: str = ""
         self.artist: str = DEFAULT_ARTIST
         self.title: str = DEFAULT_TITLE
         self.version: XMLVersion = XMLVersion.V1
@@ -403,10 +402,8 @@ class XmlConverter:
         """Detects if the XML uses namespaces."""
         if self.root is not None and self.root.tag.startswith("{"):
             self.ns_map = NS_MAP_DEFAULT
-            self.ns_prefix = "ss:"
         else:
             self.ns_map = None
-            self.ns_prefix = ""
 
     def _extract_metadata(self) -> None:
         """Extracts metadata from comments (regex) and root attributes (lxml)."""
@@ -447,9 +444,7 @@ class XmlConverter:
             return
 
         singers: list[str] = []
-        for track in self.root.findall(
-            f".//{self.ns_prefix}{XML_ELEM_TRACK}", namespaces=self.ns_map
-        ):
+        for track in self.root.findall(XML_ELEM_TRACK, self.ns_map):
             artist_name = track.get(XML_ATTR_TRACK_ARTIST)
             if artist_name:
                 singers.append(artist_name)
@@ -524,9 +519,7 @@ class XmlConverter:
                     f"XML Version {self.version}. "
                     "Processing TRACK-based SENTENCE elements "
                 )
-                track_elements = self.root.findall(
-                    f".//{self.ns_prefix}{XML_ELEM_TRACK}", namespaces=self.ns_map
-                )
+                track_elements = self.root.findall(XML_ELEM_TRACK, self.ns_map)
                 p1_lines, p2_lines = self._parse_sentences_v2_v4(track_elements)
             case _ as unreachable:
                 assert unreachable
@@ -551,9 +544,7 @@ class XmlConverter:
         current_singer = "Solo 1"
         current_beat = 0
 
-        sentence_elements = parent.findall(
-            f"./{self.ns_prefix}{XML_ELEM_SENTENCE}", namespaces=self.ns_map
-        )
+        sentence_elements = parent.findall(XML_ELEM_SENTENCE, self.ns_map)
         for sentence in sentence_elements:
             singer = sentence.get("Singer", current_singer)
             current_singer = singer  # carry forward default if missing next time
@@ -592,9 +583,7 @@ class XmlConverter:
 
         for idx, track_element in enumerate(track_elements):
             current_beat = 0
-            sentence_elements = track_element.findall(
-                f"./{self.ns_prefix}{XML_ELEM_SENTENCE}", namespaces=self.ns_map
-            )
+            sentence_elements = track_element.findall(XML_ELEM_SENTENCE, self.ns_map)
             for sentence in sentence_elements:
                 singer = sentence.get("Singer", current_singer)
                 current_singer = singer  # carry forward default if missing next time
@@ -625,9 +614,7 @@ class XmlConverter:
         line = Line(notes=[], line_break=None)
         current_beat = start_beat
 
-        for note_elem in sentence.findall(
-            f"./{self.ns_prefix}{XML_ELEM_NOTE}", namespaces=self.ns_map
-        ):
+        for note_elem in sentence.findall(XML_ELEM_NOTE, self.ns_map):
             try:
                 # Detect medley markers
                 self.extract_medley_markers(current_beat, note_elem)
@@ -700,9 +687,7 @@ class XmlConverter:
     def extract_medley_markers(
         self, current_beat: int, note_elem: etree._Element
     ) -> None:
-        for marker in note_elem.findall(
-            f"./{self.ns_prefix}{XML_ELEM_NOTE_MARKER}", namespaces=self.ns_map
-        ):
+        for marker in note_elem.findall(XML_ELEM_NOTE_MARKER, self.ns_map):
             match marker.get("Type"):
                 case "MedleyNormalBegin":
                     self.medley_start = current_beat
