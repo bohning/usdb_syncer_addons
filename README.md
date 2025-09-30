@@ -1,2 +1,2 @@
-# usdb_syncer_plugins
-USDB Syncer Plugins
+# usdb_syncer_addons
+USDB Syncer addons
