@@ -82,7 +82,7 @@ class Ui_Dialog(object):
 
     def retranslateUi(self, Dialog):
         Dialog.setWindowTitle(QCoreApplication.translate("Dialog", u"XML Converter", None))
-        self.pushbutton_pick_xml_folder.setText(QCoreApplication.translate("Dialog", u"Select XML song folder", None))
+        self.pushbutton_pick_xml_folder.setText(QCoreApplication.translate("Dialog", u"Select SingStar song folder", None))
         self.plainTextEdit_xml_conversion.setPlainText("")
         self.checkbox_overwrite.setText(QCoreApplication.translate("Dialog", u"Overwrite existing", None))
         self.pushbutton_convert.setText(QCoreApplication.translate("Dialog", u"Convert", None))
