@@ -9,7 +9,7 @@ from usdb_syncer.gui import hooks
 from usdb_syncer.gui.mw import MainWindow
 from usdb_syncer.utils import AppPaths
 from xml_converter.XMLConverterDialog import Ui_Dialog
-import converter
+from xml_converter import converter
 
 
 def on_window_loaded(main_window: MainWindow) -> None:

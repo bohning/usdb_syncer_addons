@@ -14,7 +14,7 @@ from usdb_syncer.song_txt.auxiliaries import replace_false_apostrophes
 from usdb_syncer.song_txt.tracks import BeatsPerMinute, Line, LineBreak, Note, NoteKind
 
 SINGSTAR_XML_NAMESPACE_URI = "http://www.singstargame.com"
-NS_MAP_DEFAULT = {"ss": SINGSTAR_XML_NAMESPACE_URI}
+NS_MAP_DEFAULT = {None: SINGSTAR_XML_NAMESPACE_URI}
 
 # XML Element Names
 XML_ELEM_MELODY = "MELODY"
@@ -136,18 +136,6 @@ class Encoding(StrEnum):
 
     UTF_8 = "utf-8"
     ISO_8859_1 = "iso-8859-1"
-
-    @classmethod
-    def from_string(cls, value: str | None) -> "Encoding":
-        """Converts a string to an Encoding enum value."""
-        if value == "ISO-8859-1":
-            return cls.ISO_8859_1
-        if value == "UTF-8":
-            return cls.UTF_8
-        logger.logger.warning(
-            f"Unknown encoding '{value}'. Defaulting to {cls.UTF_8.upper()}."
-        )
-        return cls.UTF_8
 
 
 class Resolution(Enum):
@@ -281,10 +269,8 @@ class XmlConverter:
     def __init__(self, input_path: Path) -> None:
         self.input_path = input_path
         self.raw_bytes: bytes | None = None
-        self.text: str = ""
         self.root: etree._Element | None = None
         self.ns_map: dict[str, str] | None = None
-        self.ns_prefix: str = ""
         self.artist: str = DEFAULT_ARTIST
         self.title: str = DEFAULT_TITLE
         self.version: XMLVersion = XMLVersion.V1
@@ -304,16 +290,12 @@ class XmlConverter:
         self.p2_name: str | None = None
 
     def _read_and_parse_xml(self) -> bool:
-        """Reads the XML file, detects encoding, and parses it using lxml."""
+        """Reads the XML file and parses it using lxml."""
         if not self._read_raw_bytes():
             return False
-        encoding = self._detect_encoding()
-        if not self._parse_xml(encoding):
-            if encoding != Encoding.ISO_8859_1:
-                logger.logger.warning("Retrying parse with ISO-8859-1 encoding...")
-                return self._parse_xml(Encoding.ISO_8859_1)
-            else:
-                return False
+        if not self._parse_xml(None):
+            logger.logger.warning("Retrying parse with ISO-8859-1 encoding...")
+            return self._parse_xml(Encoding.ISO_8859_1)
         else:
             return True
 
@@ -330,68 +312,18 @@ class XmlConverter:
             logger.logger.error(f"Error reading file bytes: {e}")
             return False
 
-    def _detect_encoding(self) -> Encoding:
-        """Attempts to detect file encoding based on the XML declaration."""
-        encoding = Encoding.UTF_8
-        if not self.raw_bytes:
-            return encoding
-        try:
-            preview_len = min(len(self.raw_bytes), 150)
-            first_line = self._try_decode_preview(preview_len)
-
-            if first_line.startswith("<?xml"):
-                encoding_match = re.search(
-                    r'encoding="([^"]+)"', first_line, re.IGNORECASE
-                )
-                if encoding_match:
-                    encoding = Encoding.from_string(encoding_match.group(1))
-                    logger.logger.info(
-                        f"Detected encoding '{encoding}' from XML declaration."
-                    )
-                else:
-                    logger.logger.info(
-                        "XML declaration found, but no encoding specified. Using "
-                        f"default encoding '{encoding}'."
-                    )
-            else:
-                logger.logger.warning(
-                    f"XML declaration not found. Using default encoding '{encoding}'."
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.logger.warning(
-                f"Failed to detect encoding reliably: {e}. "
-                f"Using default encoding '{encoding}'."
-            )
-
-        return encoding
-
-    def _try_decode_preview(self, preview_len: int) -> str:
-        """Attempts to decode the first line for encoding detection."""
-        if not self.raw_bytes:
-            return ""
-        try:
-            return self.raw_bytes[:preview_len].decode(Encoding.UTF_8).split("\n", 1)[0]
-        except UnicodeDecodeError:
-            try:
-                return (
-                    self.raw_bytes[:preview_len]
-                    .decode(Encoding.ISO_8859_1)
-                    .split("\n", 1)[0]
-                )
-            except UnicodeDecodeError:
-                return ""
-
-    def _parse_xml(self, encoding: Encoding) -> bool:
+    def _parse_xml(self, encoding: Encoding | None) -> bool:
         """Parses the raw bytes into XML tree using the specified encoding."""
         if not self.raw_bytes:
             return False
         try:
             parser = etree.XMLParser(encoding=encoding, recover=True)
             self.root = etree.fromstring(self.raw_bytes, parser=parser)
-            self.text = self.raw_bytes.decode(encoding)
             self._detect_namespace()
         except etree.XMLSyntaxError as e:
-            logger.logger.error(f"Failed to parse XML with encoding '{encoding}': {e}")
+            logger.logger.error(
+                f"Failed to parse XML with encoding '{encoding if encoding is not None else 'parser determined'}': {e}"
+            )
             return False
         except Exception as e:  # noqa: BLE001
             logger.logger.error(f"Unexpected error during XML parsing: {e}")
@@ -403,10 +335,8 @@ class XmlConverter:
         """Detects if the XML uses namespaces."""
         if self.root is not None and self.root.tag.startswith("{"):
             self.ns_map = NS_MAP_DEFAULT
-            self.ns_prefix = "ss:"
         else:
             self.ns_map = None
-            self.ns_prefix = ""
 
     def _extract_metadata(self) -> None:
         """Extracts metadata from comments (regex) and root attributes (lxml)."""
@@ -447,9 +377,7 @@ class XmlConverter:
             return
 
         singers: list[str] = []
-        for track in self.root.findall(
-            f".//{self.ns_prefix}{XML_ELEM_TRACK}", namespaces=self.ns_map
-        ):
+        for track in self.root.findall(XML_ELEM_TRACK, self.ns_map):
             artist_name = track.get(XML_ATTR_TRACK_ARTIST)
             if artist_name:
                 singers.append(artist_name)
@@ -470,35 +398,30 @@ class XmlConverter:
             )
 
     def parse_artist_title(self) -> None:
-        """Artist/Title from Comments (using regex on raw text)"""
-        artist_regex = r"<!--\s*Artist:\s*(.*?)\s*-->"
-        title_regex = r"<!--\s*Title:\s*(.*?)\s*-->"
-        artist_match = re.search(artist_regex, self.text, re.IGNORECASE)
-        title_match = re.search(title_regex, self.text, re.IGNORECASE)
-        self.artist = (
-            _insert_missing_spaces(
-                replace_false_apostrophes(
-                    artist_match.group(1)
-                    .strip()
-                    .replace("&amp;", "&")
-                    .replace(" Ft ", " feat. ")
-                    .replace(" Feat ", " feat. ")
-                    .replace(" Ft. ", " feat. ")
-                    .replace(" Feat. ", " feat. ")
+        """Artist/Title from Comments"""
+        artist_regex = r"^\s*Artist:\s*(.*?)\s*$"
+        title_regex = r"^\s*Title:\s*(.*?)\s*$"
+        for comment in self.root.iter(etree.Comment):
+            artist_match = re.search(artist_regex, comment.text, re.IGNORECASE)
+            title_match = re.search(title_regex, comment.text, re.IGNORECASE)
+            if artist_match is not None:
+                self.artist = _insert_missing_spaces(
+                    replace_false_apostrophes(
+                        artist_match.group(1)
+                        .strip()
+                        .replace("&amp;", "&")
+                        .replace(" Ft ", " feat. ")
+                        .replace(" Feat ", " feat. ")
+                        .replace(" Ft. ", " feat. ")
+                        .replace(" Feat. ", " feat. ")
+                    )
                 )
-            )
-            if artist_match
-            else DEFAULT_ARTIST
-        )
-        self.title = (
-            _insert_missing_spaces(
-                replace_false_apostrophes(
-                    title_match.group(1).strip().replace("&amp;", "&")
+            if title_match is not None:
+                self.title = _insert_missing_spaces(
+                    replace_false_apostrophes(
+                        title_match.group(1).strip().replace("&amp;", "&")
+                    )
                 )
-            )
-            if title_match
-            else DEFAULT_TITLE
-        )
 
     def _extract_tracks(self) -> Tracks:
         """Extracts note data for P1 and P2 tracks using lxml"""
@@ -524,9 +447,7 @@ class XmlConverter:
                     f"XML Version {self.version}. "
                     "Processing TRACK-based SENTENCE elements "
                 )
-                track_elements = self.root.findall(
-                    f".//{self.ns_prefix}{XML_ELEM_TRACK}", namespaces=self.ns_map
-                )
+                track_elements = self.root.findall(XML_ELEM_TRACK, self.ns_map)
                 p1_lines, p2_lines = self._parse_sentences_v2_v4(track_elements)
             case _ as unreachable:
                 assert unreachable
@@ -551,9 +472,7 @@ class XmlConverter:
         current_singer = "Solo 1"
         current_beat = 0
 
-        sentence_elements = parent.findall(
-            f"./{self.ns_prefix}{XML_ELEM_SENTENCE}", namespaces=self.ns_map
-        )
+        sentence_elements = parent.findall(XML_ELEM_SENTENCE, self.ns_map)
         for sentence in sentence_elements:
             singer = sentence.get("Singer", current_singer)
             current_singer = singer  # carry forward default if missing next time
@@ -592,9 +511,7 @@ class XmlConverter:
 
         for idx, track_element in enumerate(track_elements):
             current_beat = 0
-            sentence_elements = track_element.findall(
-                f"./{self.ns_prefix}{XML_ELEM_SENTENCE}", namespaces=self.ns_map
-            )
+            sentence_elements = track_element.findall(XML_ELEM_SENTENCE, self.ns_map)
             for sentence in sentence_elements:
                 singer = sentence.get("Singer", current_singer)
                 current_singer = singer  # carry forward default if missing next time
@@ -625,9 +542,7 @@ class XmlConverter:
         line = Line(notes=[], line_break=None)
         current_beat = start_beat
 
-        for note_elem in sentence.findall(
-            f"./{self.ns_prefix}{XML_ELEM_NOTE}", namespaces=self.ns_map
-        ):
+        for note_elem in sentence.findall(XML_ELEM_NOTE, self.ns_map):
             try:
                 # Detect medley markers
                 self.extract_medley_markers(current_beat, note_elem)
@@ -700,9 +615,7 @@ class XmlConverter:
     def extract_medley_markers(
         self, current_beat: int, note_elem: etree._Element
     ) -> None:
-        for marker in note_elem.findall(
-            f"./{self.ns_prefix}{XML_ELEM_NOTE_MARKER}", namespaces=self.ns_map
-        ):
+        for marker in note_elem.findall(XML_ELEM_NOTE_MARKER, self.ns_map):
             match marker.get("Type"):
                 case "MedleyNormalBegin":
                     self.medley_start = current_beat
