@@ -22,7 +22,7 @@
      <item>
       <widget class="QPushButton" name="pushbutton_pick_xml_folder">
        <property name="text">
-        <string>Select XML song folder</string>
+        <string>Select SingStar song folder</string>
        </property>
       </widget>
      </item>
