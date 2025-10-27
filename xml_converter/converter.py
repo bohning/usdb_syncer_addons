@@ -1,4 +1,3 @@
-import re
 import sys
 from enum import Enum, StrEnum
 from pathlib import Path
@@ -10,7 +9,6 @@ from usdb_syncer import logger
 from usdb_syncer.meta_tags import MetaTags
 from usdb_syncer.settings import Newline
 from usdb_syncer.song_txt import Headers, SongTxt, Tracks
-from usdb_syncer.song_txt.auxiliaries import replace_false_apostrophes
 from usdb_syncer.song_txt.tracks import BeatsPerMinute, Line, LineBreak, Note, NoteKind
 
 SINGSTAR_XML_NAMESPACE_URI = "http://www.singstargame.com"
@@ -85,42 +83,212 @@ DIPHTHONGS = {
 }
 
 
-def convert_singstar_xml_to_ultrastar_txt(
-    input_path: Path, overwrite: bool = False
-) -> bool:
-    """Converts a SingStar XML file to an UltraStar TXT file."""
+def convert_singstar_dir_to_ultrastar(input_dir: Path, overwrite: bool = False) -> bool:
+    """Converts a SingStar disc directory to UltraStar songs."""
 
-    converter = XmlConverter(input_path)
-    song_txt = converter.convert_to_songtxt()
+    # Parse edition from config.xml (optional)
+    try:
+        config_file = input_dir / "config.xml"
+        config_root = etree.fromstring(config_file.read_bytes())
 
-    if song_txt:
-        output_path = (
-            input_path.parent
-            / f"{song_txt.headers.artist} - {song_txt.headers.title}.txt"
+        edition = (
+            e.text.replace("®", "")
+            if (e := config_root.find("PRODUCT_DESC", NS_MAP_DEFAULT)) is not None
+            else None
         )
-        try:
-            if overwrite or not output_path.exists():
-                song_txt.write_to_file(output_path, Encoding.UTF_8, Newline.CRLF.value)
-                logger.logger.info(
-                    f"Successfully wrote UltraStar TXT to: {output_path}"
-                )
-                return True
-            else:
-                logger.logger.warning(
-                    f"File {output_path} already exists. Conversion skipped."
-                )
-                return False
-        except IOError as e:
-            logger.logger.error(f"Failed to write output file '{output_path}': {e}")
-            return False
-    else:
-        logger.logger.error(
-            f"Conversion failed for '{input_path.name}'. No output generated."
+        if not edition:
+            logger.logger.warning(f"No edition found in {config_file}")
+            edition = None
+    except IOError as e:
+        logger.logger.warning(f"Error reading file {config_file}: {e}")
+        edition = None
+    except etree.XMLSyntaxError as e:
+        logger.logger.warning(f"Failed to parse XML {config_file}: {e}")
+        edition = None
+
+    # Parse cover file info from covers.xml (optional)
+    try:
+        covers_file = input_dir / "covers.xml"
+        covers_root = etree.fromstring(covers_file.read_bytes())
+
+        covers_by_id = {
+            name.removeprefix("cover_"): e.get("TEXTURE")
+            for e in covers_root.iterfind("TPAGE_BIT", NS_MAP_DEFAULT)
+            if (name := e.get("NAME")) is not None
+        }
+    except IOError as e:
+        logger.logger.warning(f"Error reading {covers_file}: {e}")
+        covers_by_id = None
+    except etree.XMLSyntaxError as e:
+        logger.logger.warning(f"Failed to parse XML {covers_file}: {e}")
+        covers_by_id = None
+
+    covers_dir = input_dir / "textures"
+
+    # Parse song ID and metadata from songs_*_0.xml with the highest number (required)
+    try:
+        songs_file = max(
+            input_dir.glob("songs_*_0.xml"),
+            key=lambda p: int(p.name.removeprefix("songs_").removesuffix("_0.xml")),
+            default=input_dir / "songs_*_0.xml",
         )
+        songs_root = etree.fromstring(songs_file.read_bytes())
+    except IOError as e:
+        logger.logger.error(f"Error reading {songs_file}: {e}")
+        return False
+    except etree.XMLSyntaxError as e:
+        logger.logger.error(f"Failed to parse XML {songs_file}: {e}")
         return False
 
+    for song in songs_root.iterfind("SONG", NS_MAP_DEFAULT):
+        # ID, artist and title are required for successful conversion
+        id = song.get("ID", NS_MAP_DEFAULT)
+        if not id:
+            logger.logger.error(
+                f"No ID found for a song in {songs_file}. Conversion failed."
+            )
+            continue
 
-class XMLVersion(Enum):
+        artist = (
+            e.text.replace(" Ft ", " feat. ")
+            .replace(" Feat ", " feat. ")
+            .replace(" Ft. ", " feat. ")
+            .replace(" Feat. ", " feat. ")
+            .replace(" ft ", " feat. ")
+            .replace(" feat ", " feat. ")
+            .replace(" ft. ", " feat. ")
+            if (e := song.find("PERFORMANCE_NAME", NS_MAP_DEFAULT)) is not None
+            else None
+        )
+        if not artist:
+            logger.logger.error(
+                f"No artist found for song {id} in {songs_file}. Conversion failed."
+            )
+            continue
+
+        title = (
+            e.text if (e := song.find("TITLE", NS_MAP_DEFAULT)) is not None else None
+        )
+        if not title:
+            logger.logger.error(
+                f"No title found for song {id} in {songs_file}. Conversion failed."
+            )
+            continue
+
+        # Genre and year are optional
+        info = song.find("INFO", NS_MAP_DEFAULT)
+        if info is not None:
+            genre = ", ".join(e.text for e in info.iterfind("GENRE", NS_MAP_DEFAULT))
+            if not genre:
+                logger.logger.warning(f"No genre found for song {id} in {songs_file}.")
+                genre = None
+
+            year = (
+                e.text.split("-")[0]
+                if (e := info.find("RELEASE_DATE", NS_MAP_DEFAULT)) is not None
+                else None
+            )
+            if not year:
+                logger.logger.warning(f"No year found for song {id} in {songs_file}.")
+                year = None
+        else:
+            logger.logger.warning(
+                f"No genre or year found for song {id} in {songs_file}."
+            )
+            genre = None
+            year = None
+
+        song_dir = input_dir / id
+
+        # melody_*.xml file with the highest number
+        melody_file = max(
+            song_dir.glob("melody_*.xml"),
+            key=lambda p: int(p.name.removeprefix("melody_").removesuffix(".xml")),
+            default=song_dir / "melody_*.xml",
+        )
+
+        video_file = song_dir / "video.mp4"
+
+        # Finding cover file is optional
+        if covers_by_id is not None and covers_by_id.get(id) is not None:
+            cover_file = covers_dir / f"{covers_by_id.get(id)}.jpg"
+        else:
+            logger.logger.warning(f"No cover found for song {id} in {covers_file}.")
+            cover_file = None
+
+        # Parse melody file in the song directory (required)
+        converter = MelodyXmlConverter(melody_file)
+        converter.edition = edition
+        converter.artist = artist
+        converter.title = title
+        converter.genre = genre
+        converter.year = year
+        song_txt = converter.convert_to_songtxt()
+        if song_txt is None:
+            logger.logger.error(
+                f"Conversion failed for '{melody_file}'. No output generated."
+            )
+            continue
+
+        song_output_dir = input_dir / f"{artist} - {title}"
+        txt_output_file = song_output_dir / f"{artist} - {title}.txt"
+        video_output_file = song_output_dir / f"{artist} - {title}.mp4"
+        cover_output_file = song_output_dir / f"{artist} - {title} [CO].jpg"
+
+        # Create directory (required)
+        try:
+            song_output_dir.mkdir(exist_ok=overwrite)
+        except FileExistsError:
+            logger.logger.warning(
+                f"Song {song_output_dir} already exists. Conversion skipped."
+            )
+            continue
+        except IOError as e:
+            logger.logger.error(f"Failed to create directory '{song_output_dir}': {e}")
+            continue
+
+        # Create txt file (required)
+        try:
+            song_txt.write_to_file(txt_output_file, Encoding.UTF_8, Newline.CRLF.value)
+        except IOError as e:
+            logger.logger.error(f"Failed to write txt file '{txt_output_file}': {e}")
+            continue
+
+        # Create video symlink (optional)
+        try:
+            if overwrite:
+                video_output_file.unlink(missing_ok=True)
+            video_output_file.symlink_to(
+                video_file.relative_to(song_output_dir, walk_up=True)
+            )
+        except IOError as e:
+            logger.logger.warning(
+                f"Failed to create video symlink '{video_output_file}': {e}"
+            )
+
+        # Create cover symlink (optional)
+        if cover_file is not None:
+            try:
+                if overwrite:
+                    cover_output_file.unlink(missing_ok=True)
+                cover_output_file.symlink_to(
+                    cover_file.relative_to(song_output_dir, walk_up=True)
+                )
+            except IOError as e:
+                logger.logger.warning(
+                    f"Failed to create cover symlink '{cover_output_file}': {e}"
+                )
+        else:
+            logger.logger.warning(
+                f"Could not create cover symlink '{cover_output_file}'"
+            )
+
+        logger.logger.info(f"Successfully converted song {id} to {song_output_dir}")
+
+    return True
+
+
+class MelodyXMLVersion(Enum):
     """Version of SingStar XML files."""
 
     V1 = 1
@@ -255,16 +423,8 @@ def _split_lyrics_to_tildes(notes: list[Note]) -> None:
         i += 1
 
 
-def _insert_missing_spaces(text: str) -> str:
-    """Inserts missing spaces in artist and title,
-    e.g. 'MyChemicalRomance' --> 'My Chemical Romance'
-    but keeps all caps intact, e.g. 'HIM' --> 'HIM'
-    """
-    return re.sub(r"(?<=[a-z])([A-Z0-9])", r" \1", text)
-
-
-class XmlConverter:
-    """Converts a Singstar XML file to an UltraStar TXT object using lxml."""
+class MelodyXmlConverter:
+    """Converts a Singstar melody XML file to an UltraStar TXT object using lxml."""
 
     def __init__(self, input_path: Path) -> None:
         self.input_path = input_path
@@ -273,7 +433,7 @@ class XmlConverter:
         self.ns_map: dict[str, str] | None = None
         self.artist: str = DEFAULT_ARTIST
         self.title: str = DEFAULT_TITLE
-        self.version: XMLVersion = XMLVersion.V1
+        self.version: MelodyXMLVersion = MelodyXMLVersion.V1
         self.resolution: Resolution = Resolution.DEMISEMIQUAVER
         self.raw_tempo: float | None = None
         self.bpm: BeatsPerMinute
@@ -343,11 +503,12 @@ class XmlConverter:
         if self.root is None:
             logger.logger.error("Cannot extract metadata, XML root is not parsed.")
             return
-        self.parse_artist_title()
         # Attributes from root <MELODY> tag
-        self.version = XMLVersion(int(self.root.get(XML_ATTR_MELODY_VERSION, "1")))
-        self.genre = self.root.get(XML_ATTR_MELODY_GENRE, None)
-        self.year = self.root.get(XML_ATTR_MELODY_YEAR, None)
+        self.version = MelodyXMLVersion(
+            int(self.root.get(XML_ATTR_MELODY_VERSION, "1"))
+        )
+        self.genre = self.genre or self.root.get(XML_ATTR_MELODY_GENRE, None)
+        self.year = self.year or self.root.get(XML_ATTR_MELODY_YEAR, None)
         self.is_duet = _parse_bool_attribute(self.root.get(XML_ATTR_MELODY_DUET, "No"))
         self.parse_bpm()
         self.parse_duet_singer_names()
@@ -397,32 +558,6 @@ class XmlConverter:
                 "Duet flag is set, but only one track artist name found."
             )
 
-    def parse_artist_title(self) -> None:
-        """Artist/Title from Comments"""
-        artist_regex = r"^\s*Artist:\s*(.*?)\s*$"
-        title_regex = r"^\s*Title:\s*(.*?)\s*$"
-        for comment in self.root.iter(etree.Comment):
-            artist_match = re.search(artist_regex, comment.text, re.IGNORECASE)
-            title_match = re.search(title_regex, comment.text, re.IGNORECASE)
-            if artist_match is not None:
-                self.artist = _insert_missing_spaces(
-                    replace_false_apostrophes(
-                        artist_match.group(1)
-                        .strip()
-                        .replace("&amp;", "&")
-                        .replace(" Ft ", " feat. ")
-                        .replace(" Feat ", " feat. ")
-                        .replace(" Ft. ", " feat. ")
-                        .replace(" Feat. ", " feat. ")
-                    )
-                )
-            if title_match is not None:
-                self.title = _insert_missing_spaces(
-                    replace_false_apostrophes(
-                        title_match.group(1).strip().replace("&amp;", "&")
-                    )
-                )
-
     def _extract_tracks(self) -> Tracks:
         """Extracts note data for P1 and P2 tracks using lxml"""
         if self.root is None:
@@ -434,14 +569,14 @@ class XmlConverter:
         tracks = Tracks([], [])
 
         match self.version:
-            case XMLVersion.V1:
+            case MelodyXMLVersion.V1:
                 # Version 1: <SENTENCE> elements directly under <MELODY>
                 logger.logger.info(
                     f"XML Version {self.version}. "
                     "Processing SENTENCE elements directly under MELODY "
                 )
                 p1_lines, p2_lines = self._parse_sentences_v1(self.root)
-            case XMLVersion.V2 | XMLVersion.V4:
+            case MelodyXMLVersion.V2 | MelodyXMLVersion.V4:
                 # Version 2/4: <SENTENCE> elements under each <TRACK> element
                 logger.logger.info(
                     f"XML Version {self.version}. "
@@ -714,4 +849,4 @@ class XmlConverter:
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2:
-        convert_singstar_xml_to_ultrastar_txt(Path(sys.argv[1]), True)
+        convert_singstar_dir_to_ultrastar(Path(sys.argv[1]), True)
