@@ -8,8 +8,8 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QWidget
 from usdb_syncer.gui import hooks
 from usdb_syncer.gui.mw import MainWindow
 from usdb_syncer.utils import AppPaths
-from xml_converter.XMLConverterDialog import Ui_Dialog
-from xml_converter import converter
+from xml2us.XMLConverterDialog import Ui_Dialog
+from xml2us import converter
 
 
 def on_window_loaded(main_window: MainWindow) -> None:
