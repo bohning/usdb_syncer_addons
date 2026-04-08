@@ -46,6 +46,7 @@ class TTMLConverterDialog(Ui_Dialog, QDialog):
             ["File", "Artist", "Title", "BPM", "Search BPM", "Status"]
         )
         self.tableWidget_ttml_conversion.horizontalHeader().setStretchLastSection(True)
+        self.tableWidget_ttml_conversion.setSortingEnabled(True)
 
     def _select_ttml_folder(self) -> None:
         self.ttml_selected_dir = QFileDialog.getExistingDirectory(
@@ -166,6 +167,12 @@ class TTMLConverterDialog(Ui_Dialog, QDialog):
                     ttml_content = f.read()
 
                 txt = converter._convert_ttml_to_song(ttml_file, ttml_content, bpm=bpm)
+
+                if txt is None:
+                    status_item.setText("Failed")
+                    status_item.setToolTip("Failed to convert TTML file")
+                    continue
+
                 txt.write_to_file(
                     Path(
                         ttml_file.parent

@@ -16,7 +16,7 @@ from usdb_syncer.song_txt.tracks import Line, LineBreak, Note, NoteKind, Tracks
 
 def _convert_ttml_to_song(
     ttml_file: Path, ttml_content: str, bpm: BeatsPerMinute
-) -> SongTxt:
+) -> SongTxt | None:
     """Convert TTML content to UltraStar SongTxt format."""
 
     # Helper to convert TTML time format (MM:SS.mmm) to milliseconds
@@ -125,23 +125,22 @@ def _convert_ttml_to_song(
     first_beat_offset = bpm.secs_to_beats(gap_ms / 1000)
 
     # Parse spans (syllables) from paragraphs
-    lines_list = []
+    lines = []
     paragraphs = root.findall(".//{*}p")
 
-    for p_idx, paragraph in enumerate(paragraphs):
+    for paragraph in paragraphs:
         spans = paragraph.findall(".//{*}span")
         notes = []
-        last_end_ms = 0
 
-        for span in spans:
+        for i, span in enumerate(spans):
             begin_str = span.get("begin")
             end_str = span.get("end")
-            text = "".join(span.itertext()).strip() or "~"
+            tail = span.tail or "" if i < len(spans) - 1 else ""
+            text = "".join(span.itertext()).strip() + tail or "~"
 
             if begin_str and end_str:
                 begin_ms = ttml_time_to_ms(begin_str)
                 end_ms = ttml_time_to_ms(end_str)
-                last_end_ms = end_ms
 
                 start_beat = bpm.secs_to_beats(begin_ms / 1000)
 
@@ -164,10 +163,13 @@ def _convert_ttml_to_song(
         )
 
         line = Line(notes=notes, line_break=line_break)
-        lines_list.append(line)
+        lines.append(line)
 
-    lines_list[-1].line_break = None
-    tracks = Tracks(track_1=lines_list, track_2=None)
+    if len(lines) == 0:
+        return None
+
+    lines[-1].line_break = None
+    tracks = Tracks(track_1=lines, track_2=None)
 
     return SongTxt(
         headers=Headers(
@@ -183,7 +185,7 @@ def _convert_ttml_to_song(
             creator=creator,
             audio=f"{artist} - {title}.m4a",
             cover=f"{artist} - {title} [CO].jpg",
-            providedby="USDB Syncer TTML Converter Add-on",
+            providedby="USDB Syncer ttml2us Converter Add-on",
         ),
         notes=tracks,
         meta_tags=MetaTags(),
