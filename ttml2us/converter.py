@@ -1,6 +1,7 @@
 """Apple Music TTML converter add-on."""
 
 import re
+from pathlib import Path
 
 from defusedxml import ElementTree
 
@@ -13,7 +14,9 @@ from usdb_syncer.song_txt.song_txt import SongTxt
 from usdb_syncer.song_txt.tracks import Line, LineBreak, Note, NoteKind, Tracks
 
 
-def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
+def _convert_ttml_to_song(
+    ttml_file: Path, ttml_content: str, bpm: BeatsPerMinute
+) -> SongTxt:
     """Convert TTML content to UltraStar SongTxt format."""
 
     # Helper to convert TTML time format (MM:SS.mmm) to milliseconds
@@ -26,7 +29,7 @@ def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
         minutes = int(minutes_str) if minutes_str else 0
         return minutes * 60 * 1000 + int(seconds) * 1000 + int(millis)
 
-    logger.info("Converting TTML content to UltraStar TXT format...")
+    logger.info(f"Converting {ttml_file} to UltraStar TXT format...")
 
     try:
         root = ElementTree.fromstring(ttml_content)
@@ -124,8 +127,6 @@ def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
     # Parse spans (syllables) from paragraphs
     lines_list = []
     paragraphs = root.findall(".//{*}p")
-    all_notes_with_breaks = []
-    min_start_beat = None
 
     for p_idx, paragraph in enumerate(paragraphs):
         spans = paragraph.findall(".//{*}span")
@@ -155,6 +156,8 @@ def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
                 )
                 notes.append(note)
 
+        if len(notes) == 0:
+            continue
         line_break = LineBreak(
             previous_line_out_time=notes[-1].start + notes[-1].duration,
             next_line_in_time=None,
@@ -163,14 +166,6 @@ def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
         line = Line(notes=notes, line_break=line_break)
         lines_list.append(line)
 
-        # Store paragraph data for later processing
-        if notes:
-            line_break_beat = (
-                bpm.secs_to_beats(last_end_ms / 1000) if last_end_ms > 0 else 0
-            )
-            all_notes_with_breaks.append(
-                (p_idx, notes, line_break_beat, len(paragraphs))
-            )
     lines_list[-1].line_break = None
     tracks = Tracks(track_1=lines_list, track_2=None)
 

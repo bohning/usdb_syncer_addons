@@ -19,6 +19,7 @@ from ttml2us import converter
 from ttml2us.TTMLConverterDialog import Ui_Dialog
 from usdb_syncer.gui import hooks, notification
 from usdb_syncer.gui.mw import MainWindow
+from usdb_syncer.logger import logger
 from usdb_syncer.utils import AppPaths
 
 
@@ -149,6 +150,7 @@ class TTMLConverterDialog(Ui_Dialog, QDialog):
 
         success_count = 0
         for row, ttml_file in enumerate(self._ttml_files):
+            logger.debug(f"Converting TTML file: {ttml_file}")
             bpm_widget = self.tableWidget_ttml_conversion.cellWidget(row, 3)
             bpm = converter.BeatsPerMinute(400)
             if isinstance(bpm_widget, QSpinBox):
@@ -163,7 +165,7 @@ class TTMLConverterDialog(Ui_Dialog, QDialog):
                 with ttml_file.open("r", encoding="utf-8") as f:
                     ttml_content = f.read()
 
-                txt = converter._convert_ttml_to_song(ttml_content, bpm=bpm)
+                txt = converter._convert_ttml_to_song(ttml_file, ttml_content, bpm=bpm)
                 txt.write_to_file(
                     Path(
                         ttml_file.parent
