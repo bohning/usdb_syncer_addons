@@ -1,5 +1,7 @@
 """UltraStar to TTML add-on."""
 
+import html
+
 from PySide6.QtGui import QAction, QIcon
 
 from usdb_syncer.gui import hooks, notification
@@ -136,6 +138,16 @@ def _convert_to_ttml(txt: SongTxt) -> str:
         seconds, ms_rem = divmod(ms_rem, 1_000)
         return f"{minutes:02}:{seconds:02}.{ms_rem:03}"
 
+    def render_amll_meta(key: str, value: str | None) -> str:
+        if not value:
+            return ""
+
+        items = [item.strip() for item in value.split(",") if item.strip()]
+        return "\n".join(
+            f'            <amll:meta key="{key}" value="{html.escape(item, quote=True)}" />'
+            for item in items
+        )
+
     lines_xml: list[str] = []
     dur = 0
 
@@ -181,15 +193,47 @@ def _convert_to_ttml(txt: SongTxt) -> str:
         line_text = "".join(span_parts)
 
         lines_xml.append(
-            f'<p begin="{fmt(line_start)}" end="{fmt(line_end)}" '
-            f'itunes:key="L{idx}" ttm:agent="v1">{line_text}</p>'
+            f'            <p begin="{fmt(line_start)}" end="{fmt(line_end)}" '
+            f'itunes:key="L{idx}" ttm:agent="v1">\n'
+            f'                {line_text}\n'
+            f'            </p>'
         )
         dur = line_end
 
-    body = "".join(lines_xml)
+    body = "\n".join(lines_xml)
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
+    xmlns:itunes="http://music.apple.com/lyric-ttml-internal"
+    xmlns:amll="http://www.example.com/ns/amll"
+    xml:lang="{ISO_639_1_LANGUAGE_CODES.get(txt.headers.main_language(), "und")}"
+    itunes:timing="Word">
+    <head>
+        <metadata>
+            <ttm:agent type="person" xml:id="v1">
+                <ttm:name type="full">{html.escape(txt.headers.artist)}</ttm:name>
+            </ttm:agent>
+            <ttm:title>{html.escape(txt.headers.title)}</ttm:title>
+{render_amll_meta('language', txt.headers.language)}
+{render_amll_meta('genre', txt.headers.genre)}
+            <amll:meta key="year" value="{html.escape(str(txt.headers.year), quote=True)}" />
+            <amll:meta key="creator" value="{html.escape(txt.headers.creator, quote=True)} (via USDB Syncer TTML Converter Add-on)" />
+            <iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal" leadingSilence="{fmt(txt.headers.gap)}">
+                <translations/>
+                <songwriters>
+                    <songwriter>{"unknown #1"}</songwriter>
+                </songwriters>
+            </iTunesMetadata>
+        </metadata>
+    </head>
+    <body dur="{fmt(dur)}">
+        <div begin="{fmt(txt.headers.gap)}" end="{fmt(dur)}" itunes:songPart="Song">
+            {body}
+        </div>
+    </body>
+</tt>"""
 
-    # <?xml version="1.0" encoding="UTF-8"?>
-    return f"""<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Word" xml:lang="{ISO_639_1_LANGUAGE_CODES.get(txt.headers.main_language(), "und")}"><head><metadata><ttm:agent type="person" xml:id="v1"><ttm:name type="full">{txt.headers.artist}</ttm:name></ttm:agent><ttm:title>{txt.headers.title}</ttm:title><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal" leadingSilence="{fmt(txt.headers.gap)}"><translations/><songwriters><songwriter>{"unknown #1"}</songwriter></songwriters></iTunesMetadata></metadata></head><body dur="{fmt(dur)}"><div begin="{fmt(txt.headers.gap)}" end="{fmt(dur)}" itunes:songPart="Song">{body}</div></body></tt>"""
+    return xml
 
 
 hooks.MainWindowDidLoad.subscribe(on_window_loaded)
