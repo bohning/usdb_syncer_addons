@@ -189,7 +189,7 @@ def _convert_to_ttml(txt: SongTxt) -> str:
     body = "".join(lines_xml)
 
     # <?xml version="1.0" encoding="UTF-8"?>
-    return f"""<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Word" xml:lang="{ISO_639_1_LANGUAGE_CODES.get(txt.headers.main_language(), "und")}"><head><metadata><ttm:agent type="person" xml:id="v1"><ttm:name type="full">{txt.headers.artist}</ttm:name></ttm:agent><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal" leadingSilence="{fmt(txt.headers.gap)}"><translations/><songwriters><songwriter>{"unknown #1"}</songwriter></songwriters></iTunesMetadata></metadata></head><body dur="{fmt(dur)}"><div begin="{fmt(txt.headers.gap)}" end="{fmt(dur)}" itunes:songPart="Song">{body}</div></body></tt>"""
+    return f"""<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Word" xml:lang="{ISO_639_1_LANGUAGE_CODES.get(txt.headers.main_language(), "und")}"><head><metadata><ttm:agent type="person" xml:id="v1"><ttm:name type="full">{txt.headers.artist}</ttm:name></ttm:agent><ttm:title>{txt.headers.title}</ttm:title><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal" leadingSilence="{fmt(txt.headers.gap)}"><translations/><songwriters><songwriter>{"unknown #1"}</songwriter></songwriters></iTunesMetadata></metadata></head><body dur="{fmt(dur)}"><div begin="{fmt(txt.headers.gap)}" end="{fmt(dur)}" itunes:songPart="Song">{body}</div></body></tt>"""
 
 
 hooks.MainWindowDidLoad.subscribe(on_window_loaded)
