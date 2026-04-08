@@ -47,12 +47,20 @@ def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
     agent = root.find(".//ttm:agent/ttm:name", namespaces)
     if agent is not None and agent.text:
         artist = agent.text.strip()
+    else:
+        artist_element = root.find(".//amll:meta[@key='artists']", namespaces)
+        if artist_element is not None and (artist_value := artist_element.get("value")):
+            artist = artist_value.strip()
 
     # Extract title from metadata
     title = "Unknown Title"
     title_element = root.find(".//ttm:title", namespaces)
     if title_element is not None and title_element.text:
         title = title_element.text.strip()
+    else:
+        title_element = root.find(".//amll:meta[@key='musicName']", namespaces)
+        if title_element is not None and (title_value := title_element.get("value")):
+            title = title_value.strip()
 
     # Extract language(s) from metadata (if available)
     language_elements = root.findall(".//amll:meta[@key='language']", namespaces)
@@ -90,22 +98,37 @@ def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
     if creator_element is not None:
         creator = creator_element.get("value")
 
-    # Extract gap (leadingSilence in milliseconds)
+    # Extract gap (span > p > div > itunes:iTunesMetadata leadingSilence)
     gap_ms = 0
-    itunes_metadata = root.find(".//itunes:iTunesMetadata", namespaces)
-    if itunes_metadata is not None:
-        leading_silence = itunes_metadata.get("leadingSilence")
-        if leading_silence:
-            gap_ms = ttml_time_to_ms(leading_silence)
+    if (first_span := root.find(".//{*}span", namespaces)) is not None:
+        begin_str = first_span.get("begin")
+        if begin_str:
+            gap_ms = ttml_time_to_ms(begin_str)
+    elif (first_p := root.find(".//{*}p", namespaces)) is not None:
+        begin_str = first_p.get("begin")
+        if begin_str:
+            gap_ms = ttml_time_to_ms(begin_str)
+    elif (div_element := root.find(".//{*}div", namespaces)) is not None:
+        begin_str = div_element.get("begin")
+        if begin_str:
+            gap_ms = ttml_time_to_ms(begin_str)
+    else:
+        itunes_metadata = root.find(".//itunes:iTunesMetadata", namespaces)
+        if itunes_metadata is not None:
+            leading_silence = itunes_metadata.get("leadingSilence")
+            if leading_silence:
+                gap_ms = ttml_time_to_ms(leading_silence)
+
+    first_beat_offset = bpm.secs_to_beats(gap_ms / 1000)
 
     # Parse spans (syllables) from paragraphs
     lines_list = []
-    paragraphs = root.findall(".//ttml:p", namespaces)
+    paragraphs = root.findall(".//{*}p")
     all_notes_with_breaks = []
     min_start_beat = None
 
     for p_idx, paragraph in enumerate(paragraphs):
-        spans = paragraph.findall(".//ttml:span", namespaces)
+        spans = paragraph.findall(".//{*}span")
         notes = []
         last_end_ms = 0
 
@@ -121,20 +144,24 @@ def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
 
                 start_beat = bpm.secs_to_beats(begin_ms / 1000)
 
-                # Track minimum start beat for normalization
-                if min_start_beat is None or start_beat < min_start_beat:
-                    min_start_beat = start_beat
-
                 duration_beat = max(1, bpm.secs_to_beats(end_ms / 1000) - start_beat)
 
                 note = Note(
                     kind=NoteKind.REGULAR,
-                    start=start_beat,
+                    start=start_beat - first_beat_offset,
                     duration=duration_beat,
                     pitch=0,
                     text=text,
                 )
                 notes.append(note)
+
+        line_break = LineBreak(
+            previous_line_out_time=notes[-1].start + notes[-1].duration,
+            next_line_in_time=None,
+        )
+
+        line = Line(notes=notes, line_break=line_break)
+        lines_list.append(line)
 
         # Store paragraph data for later processing
         if notes:
@@ -144,28 +171,7 @@ def _convert_ttml_to_song(ttml_content: str, bpm: BeatsPerMinute) -> SongTxt:
             all_notes_with_breaks.append(
                 (p_idx, notes, line_break_beat, len(paragraphs))
             )
-
-    # Normalize all beats to start at 0
-    if min_start_beat is None:
-        min_start_beat = 0
-
-    for p_idx, notes, line_break_beat, total_paragraphs in all_notes_with_breaks:
-        # Adjust note timings
-        for note in notes:
-            note.start -= min_start_beat
-
-        # Adjust line break timing
-        line_break = None
-        if p_idx < total_paragraphs - 1:
-            # Not the last paragraph, add a line break
-            adjusted_line_break_beat = line_break_beat - min_start_beat
-            line_break = LineBreak(
-                previous_line_out_time=adjusted_line_break_beat, next_line_in_time=None
-            )
-
-        line = Line(notes=notes, line_break=line_break)
-        lines_list.append(line)
-
+    lines_list[-1].line_break = None
     tracks = Tracks(track_1=lines_list, track_2=None)
 
     return SongTxt(

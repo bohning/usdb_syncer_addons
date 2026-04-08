@@ -44,6 +44,7 @@ class TTMLConverterDialog(Ui_Dialog, QDialog):
         self.tableWidget_ttml_conversion.setHorizontalHeaderLabels(
             ["File", "Artist", "Title", "BPM", "Search BPM", "Status"]
         )
+        self.tableWidget_ttml_conversion.horizontalHeader().setStretchLastSection(True)
 
     def _select_ttml_folder(self) -> None:
         self.ttml_selected_dir = QFileDialog.getExistingDirectory(
@@ -118,9 +119,21 @@ class TTMLConverterDialog(Ui_Dialog, QDialog):
             agent = root.find(".//ttm:agent/ttm:name", namespaces)
             if agent is not None and agent.text:
                 artist = agent.text.strip()
+            else:
+                artist_element = root.find(".//amll:meta[@key='artists']", namespaces)
+                if artist_element is not None and (
+                    artist_value := artist_element.get("value")
+                ):
+                    artist = artist_value.strip()
             title_element = root.find(".//ttm:title", namespaces)
             if title_element is not None and title_element.text:
                 title = title_element.text.strip()
+            else:
+                title_element = root.find(".//amll:meta[@key='musicName']", namespaces)
+                if title_element is not None and (
+                    title_value := title_element.get("value")
+                ):
+                    title = title_value.strip()
         except ElementTree.ParseError:
             pass
 
