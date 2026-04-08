@@ -14,7 +14,7 @@ from xml2us import converter
 
 def on_window_loaded(main_window: MainWindow) -> None:
     """Add a button to the tools menu."""
-    icon_path = AppPaths.addons / "xml_converter" / "resources" / "document-convert.png"
+    icon_path = AppPaths.addons / "xml2us" / "resources" / "document-convert.png"
     icon = QIcon(icon_path.as_posix())
     action = QAction(icon, "Convert SingStar XML files", main_window)
     action.triggered.connect(lambda: XMLConverterDialog(main_window).show())
