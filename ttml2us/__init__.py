@@ -20,6 +20,7 @@ from ttml2us.TTMLConverterDialog import Ui_Dialog
 from usdb_syncer.gui import hooks, notification
 from usdb_syncer.gui.mw import MainWindow
 from usdb_syncer.logger import logger
+from usdb_syncer.settings import FixSpaces
 from usdb_syncer.utils import AppPaths
 
 
@@ -172,6 +173,18 @@ class TTMLConverterDialog(Ui_Dialog, QDialog):
                     status_item.setText("Failed")
                     status_item.setToolTip("Failed to convert TTML file")
                     continue
+
+                txt.notes.fix_all_caps(logger=logger)
+                txt.notes.fix_apostrophes(logger=logger)
+                txt.notes.fix_first_words_capitalization(logger=logger)
+                txt.notes.fix_linebreaks_yass_style(bpm=bpm, logger=logger)
+                txt.notes.fix_overlapping_and_touching_notes(logger=logger)
+                txt.notes.fix_quotation_marks(
+                    language=txt.headers.main_language(), logger=logger
+                )
+                txt.notes.fix_spaces(fix_style=FixSpaces.AFTER, logger=logger)
+                txt.headers.fix_apostrophes(logger=logger)
+                txt.headers.fix_language(logger=logger)
 
                 txt.write_to_file(
                     Path(
