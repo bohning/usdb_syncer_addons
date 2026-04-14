@@ -1,7 +1,5 @@
 """UltraStar to TTML add-on."""
 
-import html
-
 from PySide6.QtGui import QAction, QIcon
 
 from usdb_syncer.gui import hooks, notification
@@ -9,82 +7,6 @@ from usdb_syncer.gui.mw import MainWindow
 from usdb_syncer.logger import song_logger
 from usdb_syncer.song_txt import SongTxt
 from usdb_syncer.utils import AppPaths
-
-ISO_639_1_LANGUAGE_CODES = {
-    "Albanian": "sq",
-    "Arabic": "ar",
-    "Armenian": "hy",
-    "Austrian": "de",
-    "Bavarian": "de",
-    "Bosnian": "bs",
-    "Breton": "br",
-    "Bulgarian": "bg",
-    "Catalan": "ca",
-    "Chinese": "zh",
-    "Croatian": "hr",
-    "Czech": "cs",
-    "Danish": "da",
-    "Drents": "nl",
-    "Duala": "dua",  # no ISO 639-1
-    "Dutch": "nl",
-    "English": "en",
-    "Estonian": "et",
-    "Fantasy": "mis",  # no ISO 639-1
-    "Finnish": "fi",
-    "French": "fr",
-    "Gaelic": "ga",
-    "Galician": "gl",
-    "German": "de",
-    "Greek": "el",
-    "Haitian": "ht",
-    "Hebrew": "he",
-    "Hindi": "hi",
-    "Hungarian": "hu",
-    "Icelandic": "is",
-    "Indonesian": "id",
-    "Irish": "ga",
-    "Italian": "it",
-    "Japanese": "ja",
-    "Joik": "se",
-    "Korean": "ko",
-    "Latin": "la",
-    "Latvian": "lv",
-    "Lithuanian": "lt",
-    "Malagasy": "mg",
-    "Malay": "ms",
-    "Maori": "mi",
-    "Multiple": "mul",  # no ISO 639-1
-    "North Sami": "se",
-    "Norwegian": "no",
-    "Other": "mis",  # no ISO 639-1
-    "Persian": "fa",
-    "Polish": "pl",
-    "Portuguese": "pt",
-    "Portuguese (Brazil)": "pt",
-    "Quechua": "qu",
-    "Quenya": "mis",  # no ISO 639-1
-    "Romanian": "ro",
-    "Russian": "ru",
-    "Samoan": "sm",
-    "Scat": "mis",  # no ISO 639-1
-    "Scots": "sco",  # no ISO 639-1
-    "Serbian": "sr",
-    "Slovak": "sk",
-    "Slovenian": "sl",
-    "Spanish": "es",
-    "Sranan Tongo": "srn",  # no ISO 639-1
-    "Swahili": "sw",
-    "Swedish": "sv",
-    "Swiss German": "de",
-    "Tagalog": "tl",
-    "Turkish": "tr",
-    "Ukrainian": "uk",
-    "Vietnamese": "vi",
-    "Welsh": "cy",
-    "Wolof": "wo",
-    "Yoruba": "yo",
-    "Zulu": "zu",
-}
 
 
 def on_window_loaded(main_window: MainWindow) -> None:
@@ -121,119 +43,12 @@ def _convert_selection_to_ttml(main_window: MainWindow) -> None:
         ttml_path = txt_path.with_suffix(".ttml")
         try:
             with ttml_path.open("w", encoding="utf-8") as f:
-                f.write(_convert_to_ttml(txt))
+                f.write(txt.synchronized_lyrics_ttml())
             logger.info(f"Converted to TTML: {ttml_path}")
         except Exception as e:
             logger.exception(f"Failed to write TTML file: {e}")
 
     notification.success(f"Converted {len(songs_to_convert)} songs to TTML.")
-
-
-def _convert_to_ttml(txt: SongTxt) -> str:
-    def ms(note_time: int) -> int:
-        return round(txt.headers.bpm.beats_to_ms(note_time) + txt.headers.gap)
-
-    def fmt(ms_val: int) -> str:
-        minutes, ms_rem = divmod(ms_val, 60_000)
-        seconds, ms_rem = divmod(ms_rem, 1_000)
-        return f"{minutes:02}:{seconds:02}.{ms_rem:03}"
-
-    def render_amll_meta(key: str, value: str | None) -> str:
-        if not value:
-            return ""
-
-        items = [item.strip() for item in value.split(",") if item.strip()]
-        return "\n".join(
-            f'            <amll:meta key="{key}" value="{html.escape(item, quote=True)}" />'
-            for item in items
-        )
-
-    lines_xml: list[str] = []
-    dur = 0
-
-    for idx, line in enumerate(txt.notes.all_lines(), start=1):
-        notes = list(line.notes)
-        if not notes:
-            continue
-
-        line_start = ms(notes[0].start)
-        line_end = ms(notes[-1].start + notes[-1].duration)
-
-        # merge tilde-only notes and strip tildes from text
-        merged: list[tuple[int, int, str]] = []  # (start_ms, end_ms, text)
-        for note in notes:
-            text = note.text or ""
-            start = ms(note.start)
-            end = ms(note.start + note.duration)
-
-            # Strip tildes from beginning and end
-            cleaned_text = text.strip("~")
-
-            if not cleaned_text:
-                # Tilde-only syllable: merge duration with previous
-                if merged:
-                    prev_start, _prev_end, prev_text = merged[-1]
-                    merged[-1] = (prev_start, end, prev_text)
-                # if there's no previous note, just drop it
-            elif cleaned_text:
-                # Preserve trailing space if original had it
-                if text.rstrip() != text:
-                    cleaned_text += " "
-                merged.append((start, end, cleaned_text))
-
-        span_parts: list[str] = []
-        for note_index, (start, end, text) in enumerate(merged):
-            trimmed_text = text.rstrip()
-            span_parts.append(
-                f'<span begin="{fmt(start)}" end="{fmt(end)}">{trimmed_text}</span>'
-            )
-            if text.endswith(" ") and note_index < len(merged) - 1:
-                span_parts.append(" ")
-
-        line_text = "".join(span_parts)
-
-        lines_xml.append(
-            f'            <p begin="{fmt(line_start)}" end="{fmt(line_end)}" '
-            f'itunes:key="L{idx}" ttm:agent="v1">\n'
-            f'                {line_text}\n'
-            f'            </p>'
-        )
-        dur = line_end
-
-    body = "\n".join(lines_xml)
-    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<tt xmlns="http://www.w3.org/ns/ttml"
-    xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
-    xmlns:itunes="http://music.apple.com/lyric-ttml-internal"
-    xmlns:amll="http://www.example.com/ns/amll"
-    xml:lang="{ISO_639_1_LANGUAGE_CODES.get(txt.headers.main_language(), "und")}"
-    itunes:timing="Word">
-    <head>
-        <metadata>
-            <ttm:agent type="person" xml:id="v1">
-                <ttm:name type="full">{html.escape(txt.headers.artist)}</ttm:name>
-            </ttm:agent>
-            <ttm:title>{html.escape(txt.headers.title)}</ttm:title>
-{render_amll_meta('language', txt.headers.language)}
-{render_amll_meta('genre', txt.headers.genre)}
-            <amll:meta key="year" value="{html.escape(str(txt.headers.year), quote=True)}" />
-            <amll:meta key="creator" value="{html.escape(txt.headers.creator, quote=True)} (via USDB Syncer TTML Converter Add-on)" />
-            <iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal" leadingSilence="{fmt(txt.headers.gap)}">
-                <translations/>
-                <songwriters>
-                    <songwriter>{"unknown #1"}</songwriter>
-                </songwriters>
-            </iTunesMetadata>
-        </metadata>
-    </head>
-    <body dur="{fmt(dur)}">
-        <div begin="{fmt(txt.headers.gap)}" end="{fmt(dur)}" itunes:songPart="Song">
-            {body}
-        </div>
-    </body>
-</tt>"""
-
-    return xml
 
 
 hooks.MainWindowDidLoad.subscribe(on_window_loaded)
